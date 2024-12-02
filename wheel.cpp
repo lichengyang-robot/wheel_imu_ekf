@@ -26,7 +26,7 @@ Eigen::MatrixXd R_ = Eigen::MatrixXd::Identity(5, 5) * 0.001;   // 测量噪声
 ros::Publisher path_pub;
 ros::Publisher odom_pub;
 double last_update_time = 0.0; // 上次更新时间
-
+nav_msgs::Path path_msg;
 bool initialized =false;
 
 // 计算旋转矩阵
@@ -185,13 +185,19 @@ void publishPath() {
     pose_msg.pose.orientation.z = q.z();
     pose_msg.pose.orientation.w = q.w();
 
-    static int jjj = 0;
-    jjj++;
-    if (jjj % 10 == 0) // if path is too large, the rvis will crash
-    {
-        // 发布到路径
-        path_pub.publish(pose_msg);
+    // 添加到路径消息中
+    path_msg.header.stamp = ros::Time::now();
+    path_msg.header.frame_id = "world"; // 调整为您的坐标系
+    path_msg.poses.push_back(pose_msg);
+
+    // 控制路径长度，防止 rviz 崩溃
+    static const size_t max_path_size = 1000000; // 设置路径点的最大数量
+    if (path_msg.poses.size() > max_path_size) {
+        path_msg.poses.erase(path_msg.poses.begin());
     }
+
+    // 发布路径消息
+    path_pub.publish(path_msg);
 
 }
 
@@ -265,7 +271,7 @@ void syncData() {
 
             // 发布状态的路径和里程计
             publishPath();
-            publishOdometry();
+            // publishOdometry();
 
             // 输出状态
             ROS_INFO_STREAM("Position: " << state_.position.transpose());
@@ -298,13 +304,17 @@ int main(int argc, char **argv) {
     ros::Subscriber odom_sub = nh.subscribe("/ridgeback_velocity_controller/odom", 100, odomCallback);
 
     // 发布 Path 和 Odometry
-    path_pub = nh.advertise<nav_msgs::Path>("/robot_pat", 100);
+    path_pub = nh.advertise<nav_msgs::Path>("/robot_path", 100);
     odom_pub = nh.advertise<nav_msgs::Odometry>("/robot_odometry", 100);
+
+    ros::Rate rate(50);
     // 定时器用于调用同步数据处理函数
     ros::Timer timer = nh.createTimer(ros::Duration(0.01), [](const ros::TimerEvent&) { syncData(); });
 
     // 启动回调处理
     ros::spin();
+
+    rate.sleep();
 
     return 0;
 }
