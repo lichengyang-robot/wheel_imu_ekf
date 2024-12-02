@@ -3,9 +3,8 @@
 This repository implements **Extended Kalman Filter (EKF)** to fuse wheel odometry and IMU data for robust motion estimation.
 
 ---
-![alt text](image-2.png)
-![Algorithm Overview](image.png)
-
+![alt text](pics/image-1.png)
+![alt text](pics/image.png)
 ## Features
 
 - Real-time fusion of wheel odometry and IMU data.
