@@ -9,11 +9,12 @@ find_package(catkin REQUIRED COMPONENTS
   sensor_msgs
   nav_msgs
   message_filters
+  irp_sen_msgs
 )
 
 ## 声明catkin包
 catkin_package(
-  CATKIN_DEPENDS message_filters sensor_msgs geometry_msgs roscpp
+  CATKIN_DEPENDS message_filters sensor_msgs geometry_msgs roscpp irp_sen_msgs
 )
 
 ## 包含头文件目录
@@ -23,5 +24,13 @@ include_directories(
 )
 
 ## 编译节点
-add_executable(ekf_node wheel.cpp)
-target_link_libraries(ekf_node ${catkin_LIBRARIES})
+add_executable(kf_node wheel_kf.cpp)
+target_link_libraries(kf_node ${catkin_LIBRARIES})
+
+## 编译节点
+add_executable(eskf_node wheel_eskf.cpp)
+target_link_libraries(eskf_node ${catkin_LIBRARIES})
+
+## 编译节点
+add_executable(encoder encoder_process.cpp)
+target_link_libraries(encoder ${catkin_LIBRARIES})

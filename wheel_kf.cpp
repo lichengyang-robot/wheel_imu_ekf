@@ -165,7 +165,6 @@ void odomCallback(const nav_msgs::Odometry::ConstPtr &odom_msg) {
     // std::cout << "wheel_queue.size()=" << wheel_queue.size() << std::endl;
 }
 
-
 // 发布路径 (Path)
 void publishPath() {
     // 创建 PoseStamped 消息
@@ -256,7 +255,7 @@ void syncData() {
         }
         // 时间戳差值小于阈值，认为数据同步
         if (std::abs(imu_time - wheel_time) < 0.01) {
-            double delta_t = (last_update_time == 0.0) ? 0.01 : (imu_time - last_update_time);
+            double delta_t = (last_update_time == 0.0) ? 0.01 : (last_update_time - imu_time);
             if (delta_t <= 0.0) {
                 ROS_WARN("Non-positive delta_t encountered!");
                 return;
@@ -267,7 +266,7 @@ void syncData() {
             updateWheelOdom(wheel_msg);
 
             // 更新时间戳
-            last_update_time = imu_time;
+            last_update_time = wheel_time;
 
             // 发布状态的路径和里程计
             publishPath();
