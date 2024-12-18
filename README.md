@@ -3,8 +3,8 @@
 This repository implements **Extended Kalman Filter (EKF)** to fuse wheel odometry and IMU data for robust motion estimation.
 
 ---
-![alt text](image-2.png)
-![Algorithm Overview](image.png)
+![alt text](/pics/image1.png)
+![Algorithm Overview](/pics/image2.png)
 
 ## Features
 
@@ -52,33 +52,9 @@ To use this repository, ensure you have the following dependencies installed:
 
 3. Run the nodes:
    ```bash
-   roslaunch wheel_imu_ekf ekf_fusion.launch
+   rosrun imu_wheel_localization eskf_node
    ```
 
-## Usage
-
-- **Input Topics:**
-  - `/imu/data_raw`: Raw IMU data (linear acceleration, angular velocity).
-  - `/wheel/odometry`: Wheel odometry data.
-
-- **Output Topics:**
-  - `/fusion/pose`: Fused pose (position and orientation).
-  - `/fusion/path`: Fused trajectory.
-
-- **Configuration:**
-  Modify parameters in `config/ekf_params.yaml` to tune the filter for your application.
-
-## Examples
-
-1. Visualize the fused trajectory in `rviz`:
-   ```bash
-   rosrun rviz rviz
-   ```
-
-2. Test with a sample bag file:
-   ```bash
-   rosbag play data/sample.bag
-   ```
 
 ## Contribution
 
