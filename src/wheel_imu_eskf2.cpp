@@ -21,7 +21,6 @@ constexpr double GRAVITY = 9.81; // 重力加速度常量
 struct State {
     Eigen::Vector2d position;  // 位置 [x, y]
     Eigen::Vector2d velocity;  // 速度 [vx, vy] 线速度,角速度
-    Eigen::Vector2d acceleration;  // 速度 [vx, vy] 线速度,角速度
     double theta;              // 偏航角
     Eigen::MatrixXd P;         // 状态协方差矩阵
     Eigen::MatrixXd Q;         // 过程噪声
@@ -30,17 +29,16 @@ struct State {
     State() {
         position.setZero();
         velocity.setZero();
-        acceleration.setZero();
         theta = 0.0;
-        P = Eigen::MatrixXd::Identity(7, 7);
-        Q = Eigen::MatrixXd::Identity(7, 7) * 0.1;
-        R = Eigen::MatrixXd::Identity(5, 5) * 100000;
+        P = Eigen::MatrixXd::Identity(5, 5);
+        Q = Eigen::MatrixXd::Identity(5, 5) * 0.01;
+        R = Eigen::MatrixXd::Identity(5, 5) * 100;
     }
 };
 
 State state, old_state; 
-nav_msgs::Path path_msg, path_msg_wheel;
-ros::Publisher path_pub, path_pub_wheel, odom_pub;
+nav_msgs::Path path_msg;
+ros::Publisher path_pub, odom_pub;
 
 std::deque<sensor_msgs::Imu::ConstPtr> imu_queue;
 std::deque<nav_msgs::Odometry::ConstPtr> wheel_odom_queue;
@@ -129,8 +127,8 @@ void encoderCallback(const irp_sen_msgs::encoder::ConstPtr& msg) {
     odom2_msg.header.frame_id = "world";
     odom2_msg.child_frame_id = "base_link";
 
-    odom2_msg.pose.pose.position.x = x_;
-    odom2_msg.pose.pose.position.y = y_;
+    odom2_msg.pose.pose.position.x = delta_x;
+    odom2_msg.pose.pose.position.y = delta_y;
     odom2_msg.pose.pose.position.z = 0.0;
 
     tf2::Quaternion q;
@@ -140,8 +138,8 @@ void encoderCallback(const irp_sen_msgs::encoder::ConstPtr& msg) {
     odom2_msg.pose.pose.orientation.z = q.z();
     odom2_msg.pose.pose.orientation.w = q.w();
 
-    odom2_msg.twist.twist.linear.x = linear_velocity * cos(theta_);
-    odom2_msg.twist.twist.linear.y = linear_velocity * sin(theta_);
+    odom2_msg.twist.twist.linear.x = linear_velocity;
+    odom2_msg.twist.twist.linear.y = theta_;
     odom2_msg.twist.twist.linear.z = 0.0;
 
     odom2_msg.twist.twist.angular.x = 0.0;
@@ -158,32 +156,6 @@ void encoderCallback(const irp_sen_msgs::encoder::ConstPtr& msg) {
     boost::shared_ptr<const nav_msgs::Odometry> odom_ptr(new nav_msgs::Odometry(odom2_msg));
     wheel_odom_queue.push_back(odom_ptr);
 
-    // geometry_msgs::PoseStamped pose_msg_wheel;
-    // pose_msg_wheel.header.stamp = current_time;
-    // pose_msg_wheel.header.frame_id = "world";
-
-    // pose_msg_wheel.pose.position.x = x_;
-    // pose_msg_wheel.pose.position.y = y_;
-    // pose_msg_wheel.pose.position.z = 0.0;
-
-    // tf2::Quaternion q_wheel;
-    // q_wheel.setRPY(0, 0, theta_);
-    // pose_msg_wheel.pose.orientation.x = q_wheel.x();
-    // pose_msg_wheel.pose.orientation.y = q_wheel.y();
-    // pose_msg_wheel.pose.orientation.z = q_wheel.z();
-    // pose_msg_wheel.pose.orientation.w = q_wheel.w();
-
-    // path_msg_wheel.header.stamp = current_time;
-    // path_msg_wheel.header.frame_id = "world";
-    // path_msg_wheel.poses.push_back(pose_msg_wheel);
-
-    // static int kkk = 0;
-    // kkk++;
-    // if (kkk % 10 == 0) // if path is too large, the rvis will crash
-    // {
-    //     path_msg_wheel.poses.push_back(pose_msg_wheel);
-    //     path_pub_wheel.publish(path_msg_wheel);
-    // }
 }
 
 // === 回调函数 ===
@@ -193,7 +165,7 @@ void imuCallback(const sensor_msgs::Imu::ConstPtr &msg) {
 }
 
 // === 发布路径 ===
-void publishPath() {
+void publishPath(const sensor_msgs::Imu::ConstPtr &imu_msg) {
     geometry_msgs::PoseStamped pose_msg;
     pose_msg.header.stamp = ros::Time::now();
     pose_msg.header.frame_id = "world";
@@ -211,15 +183,14 @@ void publishPath() {
 
     path_msg.header.stamp = ros::Time::now();
     path_msg.header.frame_id = "world";
-    
-    static int jjj = 0;
-    jjj++;
-    if (jjj % 10 == 0) // if path is too large, the rvis will crash
-    {
-        path_msg.poses.push_back(pose_msg);
-        path_pub.publish(path_msg);
+    path_msg.poses.push_back(pose_msg);
+
+    const size_t max_path_size = 1000000;
+    if (path_msg.poses.size() > max_path_size) {
+        path_msg.poses.erase(path_msg.poses.begin());
     }
-    
+
+    path_pub.publish(path_msg);
 }
 
 // === 发布里程计 ===
@@ -257,7 +228,7 @@ Eigen::Matrix3d computeRotationMatrix(const Eigen::Vector3d &angular_velocity, d
 
 // === 状态预测 ===
 void predictState(const sensor_msgs::Imu::ConstPtr &imu_msg, double dt) {
-    // // 1. 提取 IMU 数据 (线加速度 + 角速度)
+    // 1. 提取 IMU 数据 (线加速度 + 角速度)
     Eigen::Vector3d linear_acc(imu_msg->linear_acceleration.x, 
                                imu_msg->linear_acceleration.y, 
                                imu_msg->linear_acceleration.z);
@@ -267,55 +238,51 @@ void predictState(const sensor_msgs::Imu::ConstPtr &imu_msg, double dt) {
                          imu_msg->orientation.y, 
                          imu_msg->orientation.z);
 
-    // 1. 提取 IMU 数据 (线加速度 + 角速度)
     // Eigen::Vector3d linear_acc(0.0, 
     //                            0.0, 
     //                            0.0);
-    // // 使用四元数生成旋转矩阵
-    // Eigen::Quaterniond q(1.0, 
-    //                      0.0, 
-    //                      0.0, 
-    //                      0.0);
+    // //使用四元数生成旋转矩阵
+    // Eigen::Quaterniond q(1, 
+    //                      0, 
+    //                      0, 
+    //                      0);
 
     Eigen::Matrix3d R = q.toRotationMatrix();
 
     Eigen::Vector3d gravity_imu(0, 0, GRAVITY);
     Eigen::Vector3d acc_world = R * linear_acc - gravity_imu;
 
+    // 2. 计算角速度
+    double imu_delta_angular = imu_msg->angular_velocity.z * dt; 
+    //  double imu_delta_angular = 0.0 * dt; 
+    double delta_angular = normalizeAngle(old_state.theta + imu_delta_angular);
+    state.theta = delta_angular;
+
     // 3. 计算状态转移矩阵 F
-    Eigen::MatrixXd F = Eigen::MatrixXd::Identity(7, 7);
+    Eigen::MatrixXd F = Eigen::MatrixXd::Identity(5, 5);
     F(0, 2) = dt; 
-    F(0, 4) = 0.5 * dt * dt; 
     F(1, 3) = dt; 
-    F(1, 5) = 0.5 * dt * dt; 
-    F(2, 4) = dt; 
-    F(3, 5) = dt; 
-    
+    F(2, 4) = -state.velocity(1) * sin(state.theta) * dt; 
+    F(3, 4) = state.velocity(0) * cos(state.theta) * dt; 
+
     // 6. 计算状态
     state.position = old_state.position + state.velocity * dt + 0.5 * acc_world.head<2>() * dt * dt;
     state.velocity = old_state.velocity + acc_world.head<2>() * dt;
-    state.acceleration = acc_world.head<2>();
-    // 2. 计算角速度
-    double imu_delta_angular = imu_msg->angular_velocity.z * dt; 
-    double delta_angular = normalizeAngle(old_state.theta + imu_delta_angular);
-    state.theta = delta_angular;
-    // state.theta =  atan2(sin(state.theta), cos(state.theta));
+    state.theta =  atan2(sin(state.theta), cos(state.theta));
 
     // 7. 计算协方差
     state.P = F * old_state.P * F.transpose() + state.Q;
-    
-    std::cout<<"predict state.P.diagonal() :"<<state.P.diagonal().transpose()<<std::endl;
 }
 
 
 Eigen::VectorXd stateToVector1() {
     Eigen::VectorXd x(5);
-    x << state.position(0) - old_state.position(0), state.position(1) - old_state.position(1), old_state.velocity(0), old_state.velocity(1), old_state.theta;
+    x << state.position(0) - old_state.position(0), state.position(1) - old_state.position(1), state.velocity(0), state.velocity(1), state.theta;
     return x;
 }
 Eigen::VectorXd stateToVector2() {
-    Eigen::VectorXd x(7);
-    x << old_state.position(0), old_state.position(1), old_state.velocity(0), old_state.velocity(1), old_state.acceleration(0), old_state.acceleration(1),old_state.theta;
+    Eigen::VectorXd x(5);
+    x << old_state.position(0), old_state.position(1), old_state.velocity(0), old_state.velocity(1), old_state.theta;
     return x;
 }
 
@@ -324,50 +291,48 @@ void vectorToState(const Eigen::VectorXd &x) {
     state.position(1) = x(1);
     state.velocity(0) = x(2);
     state.velocity(1) = x(3);
-    state.acceleration(0) = x(4);
-    state.acceleration(1) = x(5);
-    state.theta = x(6);
+    state.theta = x(4);
 }
 // === 状态更新 ===
 void updateObservation_eskf(const nav_msgs::Odometry::ConstPtr &wheel_msg) {
-    double wheel_x = wheel_msg->pose.pose.position.x;
-    double wheel_y = wheel_msg->pose.pose.position.y;
-
     double delta_t = wheel_msg->header.stamp.toSec() - last_wheel_time;
-    double wheel_delta_angular = wheel_msg->twist.twist.angular.z * delta_t +1e-5; // 从轮速计得到的角速度
-    // std::cout<<"wheel_delta_angular: "<<wheel_delta_angular * 3.1415926<<std::endl;
-    double delta_angular = normalizeAngle(old_state.theta + wheel_delta_angular);
-    Eigen::VectorXd z(5);
-    z<< wheel_x,
-        wheel_y, 
-        wheel_msg->twist.twist.linear.x, 
-        wheel_msg->twist.twist.linear.y, 
-        delta_angular;
 
-    Eigen::Matrix<double, 5, 7> H;
+    double h_theta = wheel_msg->twist.twist.linear.y;
+
+    double h_wheel_Vx = wheel_msg->twist.twist.linear.x;
+    double delta_wheel_x = h_wheel_Vx * cos(h_theta) * delta_t;
+    double delta_wheel_y = h_wheel_Vx * sin(h_theta) * delta_t;
+    double h_wheel_x = old_state.position(0) + delta_wheel_x;
+    double h_wheel_y = old_state.position(1) + delta_wheel_x;
+    Eigen::VectorXd z(5);
+    z<< h_wheel_x,
+        h_wheel_y, 
+        h_wheel_Vx * cos(h_theta) , 
+        h_wheel_Vx * sin(h_theta) , 
+        h_theta;
+
+    Eigen::Matrix<double, 5, 5> H;
     H.setZero();
     H(0, 0) = 1;
     H(1, 1) = 1;
     H(2, 2) = 1; // 对 vx 的影响
     H(3, 3) = 1; // 对 vy 的影响 
-    H(4, 6) = 1; // 对 theta 的影响
+    H(3, 4) = 1;                // 对 theta 的影响
     Eigen::VectorXd y = z - H * stateToVector2();
     // ROS_INFO_STREAM("y: " << y.transpose());
-    Eigen::MatrixXd S = H * old_state.P * H.transpose() + state.R; //5*7 * 7*7 * 7*5 + 5*5 = 5*5
-    Eigen::MatrixXd K = old_state.P * H.transpose() * S.inverse(); //7*7 * 7*5 * 5*5 = 7*5
-    // K.block<2, 2>(0, 0) = K.block<2, 2>(0, 0)  * 0.5;
-    std::cout<<"K.diagonal() :"<<K.diagonal().transpose()<<std::endl;
-    Eigen::VectorXd x_new = stateToVector2() + K * y; // 更新后的状态向量 7*1 +7*5*7*1 =7*1
+    Eigen::MatrixXd S = H * state.P * H.transpose() + state.R; //5*5 * 5*5 * 5*5 + 5*5 = 5*5
+    Eigen::MatrixXd K = state.P * H.transpose() * S.inverse(); //5*5 * 5*5 * 5*5 = 5*5
+
+    Eigen::VectorXd x_new = stateToVector2() + K * y; // 更新后的状态向量 5*1 +5*5*4*1 =5*1
     vectorToState(x_new); // 转换回状态结构
 
-    Eigen::MatrixXd I = Eigen::MatrixXd::Identity(7, 7);
-    state.P = (I - K * H) * old_state.P;
-    std::cout<<"state.P.diagonal() :"<<state.P.diagonal().transpose()<<std::endl;
+    Eigen::MatrixXd I = Eigen::MatrixXd::Identity(5, 5);
+    state.P = (I - K * H) * state.P * (I - K * H).transpose() + K * state.R * K.transpose();
     last_wheel_time = wheel_msg->header.stamp.toSec();
 }
 
 void syncData() {
-    if(imu_queue.size() < 5 && wheel_odom_queue.size()< 5 ){
+    if(imu_queue.size() < 50 && wheel_odom_queue.size()< 50 ){
         return;
     }
     else if(!imu_queue.empty() && !wheel_odom_queue.empty()) {
@@ -382,8 +347,6 @@ void syncData() {
             state.position(1) = 0.0;
             state.velocity(0) = 0.0;
             state.velocity(1) = 0.0;
-            state.acceleration(0) = 0.0;
-            state.acceleration(1) = 0.0;
             state.theta = 0.0;
             last_imu_msg = imu_queue.front();
             last_imu_time = last_imu_msg->header.stamp.toSec();
@@ -392,14 +355,10 @@ void syncData() {
             // // 基于IMU加速度估计初始速度
 
             // 初始协方差矩阵设定较大值，以便逐步调整
-            state.P = Eigen::MatrixXd::Identity(7, 7);
-            state.P.block<2, 2>(0, 0) = Eigen::MatrixXd::Identity(2, 2) * 1.0;
-            state.P.block<4, 4>(2, 2) = Eigen::MatrixXd::Identity(4, 4) * 0.5;
-            state.P.block<1, 1>(6, 6) = Eigen::MatrixXd::Identity(1, 1) * 0.1;
-
-            state.R.block<2, 2>(0, 0) = Eigen::MatrixXd::Identity(2, 2) * 100;
-            state.R.block<2, 2>(2, 2) = Eigen::MatrixXd::Identity(2, 2) * 10;
-            state.R.block<1, 1>(4, 4) = Eigen::MatrixXd::Identity(1, 1) * 1000;
+            state.P = Eigen::MatrixXd::Identity(5, 5) * 10;
+            state.R.block<2, 2>(0, 0) = Eigen::MatrixXd::Identity(2, 2) * 0.1; // 高协方差，允许不确定性
+            state.R.block<2, 2>(2, 2) = Eigen::MatrixXd::Identity(2, 2) * 0.1;
+            state.R.block<1, 1>(4, 4) = Eigen::MatrixXd::Identity(1, 1) * 0.1;
 
             old_state = state; // 更新初始状态
 
@@ -410,26 +369,29 @@ void syncData() {
             wheel_odom_queue.pop_front();
         }
         else if(initialized && !imu_queue.empty() && !wheel_odom_queue.empty()){
-
+            updateObservation_eskf(wheel_msg);
+            wheel_odom_queue.pop_front(); // 丢弃轮速计数据    
             // 检查时间戳差值并同步
             while (imu_queue.front()->header.stamp.toSec() < last_wheel_time) {
                 double delta_t = imu_queue.front()->header.stamp.toSec() - last_imu_time;
+
                 // 状态预测与更新
                 predictState(imu_queue.front(), delta_t);
+
                 // 更新时间戳
                 last_imu_time = imu_queue.front()->header.stamp.toSec();
+
                 last_imu_msg = imu_queue.front();
                 // 移除已处理的数据
-                // ROS_INFO_STREAM("imu_queue.size(): " << imu_queue.size());
+                ROS_INFO_STREAM("imu_queue.size(): " << imu_queue.size());
                 imu_queue.pop_front();
 
-                // 更新历史状态
-                old_state = state;
-            }                  
-            updateObservation_eskf(wheel_msg);
-            wheel_odom_queue.pop_front(); // 丢弃轮速计数据
+            }   
+           
+            // 更新历史状态
+            old_state = state;
             // 发布路径与里程计
-            publishPath();
+            publishPath(imu_queue.front());
             publishOdometry();
         }
         else {
@@ -440,15 +402,14 @@ void syncData() {
 }
 
 int main(int argc, char **argv) {
-    ros::init(argc, argv, "imu_wheel_fusion_node");
+    ros::init(argc, argv, "imu_wheel_fusion_node2");
     ros::NodeHandle nh;
 
     // 初始化状态
     state.position = Eigen::Vector2d::Zero();
     state.velocity = Eigen::Vector2d::Zero();
-    state.acceleration = Eigen::Vector2d::Zero();
     state.theta = 0.0;
-    state.P = Eigen::MatrixXd::Identity(7, 7) * 3.0;
+    state.P = Eigen::MatrixXd::Identity(5, 5) * 1.0;
 
     // 订阅 IMU 和轮速计话题
     ros::Subscriber imu_sub = nh.subscribe("/imu/data_raw", 100, imuCallback);
@@ -456,15 +417,14 @@ int main(int argc, char **argv) {
     encoder_sub = nh.subscribe("/encoder_count", 10, &encoderCallback);
     // imu_sub = nh.subscribe("/xsens_imu_data", 10, imuCallback);
     // 发布 Path 和 Odometry
-    path_pub = nh.advertise<nav_msgs::Path>("/path", 100);
-    // path_pub_wheel = nh.advertise<nav_msgs::Path>("/path_wheel", 100);
+    path_pub = nh.advertise<nav_msgs::Path>("/path2", 100);
     odom_pub = nh.advertise<nav_msgs::Odometry>("/odometry", 100);
 
     ros::Rate rate(5000000);
-    // // 定时器用于调用同步数据处理函数
-    ros::Timer timer = nh.createTimer(ros::Duration(1e-5), [](const ros::TimerEvent&) { syncData(); });
+    // 定时器用于调用同步数据处理函数
+    ros::Timer timer = nh.createTimer(ros::Duration(0.00001), [](const ros::TimerEvent&) { syncData(); });
 
-    // // 启动回调处理
+    // 启动回调处理
     ros::spin();
 
     rate.sleep();

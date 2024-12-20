@@ -26,5 +26,8 @@ target_link_libraries(wheel_imu_kf ${catkin_LIBRARIES})
 add_executable(wheel_imu_eskf src/wheel_imu_eskf.cpp)
 target_link_libraries(wheel_imu_eskf ${catkin_LIBRARIES})
 
+add_executable(wheel_imu_eskf2 src/wheel_imu_eskf2.cpp)
+target_link_libraries(wheel_imu_eskf2 ${catkin_LIBRARIES})
+
 add_executable(encoder src/encoder_process.cpp)
 target_link_libraries(encoder ${catkin_LIBRARIES})
